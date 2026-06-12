@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from .exceptions import ApiError
+from .models.vdms import VdmsVehicleInformation
 
 _SSL_CONTEXT = ssl.create_default_context()
 
@@ -33,6 +34,59 @@ query GetVDMSCars {
             registrationNo
             modelYear
             content { model { name } }
+        }
+    }
+}
+"""
+
+APP_BACKEND_GET_VDMS_FULL_QUERY = """
+query GetVDMSCars {
+    vdms {
+        getVehiclesInformation {
+            vin
+            internalVehicleIdentifier
+            registrationNo
+            market
+            modelYear
+            edition
+            factoryCompleteDate
+            primaryDriver
+            belongsToFleet
+            packages
+            curbWeight { value unit }
+            maxTrailerWeight { value unit }
+            software { performanceOptimization { value } }
+            content {
+                model { name }
+                motor { name }
+                exterior { name }
+                interior { name }
+                wheels { name }
+                pilotPackage { name }
+                plusPackage { name }
+                performancePackage { name }
+                performanceOptimizationSpecification { power { value unit } torqueMax { value unit } }
+                dimensions {
+                    bodyDimensions { label value }
+                    groundClearanceWithPerformance { label value }
+                    groundClearanceWithoutPerformance { label value }
+                    wheelbase { label value }
+                }
+                images {
+                    interior { alt angle url }
+                    exterior { alt angle url }
+                    exteriorTransparent { alt angle url }
+                    rims { alt angle url }
+                }
+                specification {
+                    battery
+                    electricMotors
+                    torque
+                    totalHp
+                    totalKw
+                    trunkCapacity { label value }
+                }
+            }
         }
     }
 }
@@ -106,6 +160,43 @@ async def get_vehicles(access_token: str) -> list[VehicleInfo]:
             raise ApiError(f"Vehicle list failed (app-backend: {graphql_error})")
 
         return _extract_app_backend_vehicles(data)
+
+
+async def get_vehicle_specifications(access_token: str) -> list[VdmsVehicleInformation]:
+    """Fetch full VDMS specifications for the user's vehicles.
+
+    Uses the same app-backend GraphQL endpoint and ``X-PolestarId-Authorization``
+    header as :func:`get_vehicles`, but selects the full VDMS field set (model
+    year, packages, battery, specifications, dimensions, images, etc.).
+    """
+    async with httpx.AsyncClient(verify=_SSL_CONTEXT, timeout=30) as client:
+        response = await client.post(
+            APP_BACKEND_GRAPHQL_URL,
+            headers={
+                **_app_backend_headers(access_token),
+                "Accept": APP_BACKEND_ACCEPT_HEADER,
+                "Content-Type": "application/json",
+            },
+            json={
+                "operationName": APP_BACKEND_OPERATION_NAME,
+                "variables": {},
+                "query": APP_BACKEND_GET_VDMS_FULL_QUERY,
+                "extensions": {"clientLibrary": APP_BACKEND_CLIENT_LIBRARY},
+            },
+        )
+        if response.status_code != 200:
+            raise ApiError(
+                f"VDMS specifications failed (app-backend: {_http_failure(response)})",
+                response.status_code,
+            )
+
+        data = response.json()
+        graphql_error = _graphql_error_text(data.get("errors"))
+        if graphql_error:
+            raise ApiError(f"VDMS specifications failed (app-backend: {graphql_error})")
+
+        cars = ((data.get("data") or {}).get("vdms") or {}).get("getVehiclesInformation") or []
+        return [VdmsVehicleInformation.from_dict(car) for car in cars if isinstance(car, dict)]
 
 
 def _extract_app_backend_vehicles(data: dict[str, Any]) -> list[VehicleInfo]:

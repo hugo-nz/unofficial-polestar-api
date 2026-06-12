@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from .auth import AuthManager, FileTokenStore, TokenStore
 from .connection import GrpcConnection
-from .discovery import VehicleInfo, discover_c3_endpoint, get_vehicles
+from .discovery import (
+    VehicleInfo,
+    discover_c3_endpoint,
+    get_vehicle_specifications as _fetch_specifications,
+    get_vehicles,
+)
+from .models.vdms import VdmsVehicleInformation
 from .vehicle import Vehicle
 
 
@@ -68,6 +74,18 @@ class PolestarApi:
             if v.vin == vin:
                 return v
         raise ValueError(f"Vehicle not found: {vin}")
+
+    async def get_vehicle_specifications(self) -> dict[str, VdmsVehicleInformation]:
+        """Fetch full VDMS specifications (model year, packages, battery,
+        specifications, dimensions, images) for the account, keyed by VIN.
+
+        Additive helper that reuses the existing app-backend endpoint and token;
+        it does not require the gRPC connection and leaves ``get_vehicles`` and
+        all live gRPC methods unchanged.
+        """
+        token = await self._auth.ensure_valid_token()
+        specs = await _fetch_specifications(token)
+        return {spec.vin: spec for spec in specs if spec.vin}
 
     async def close(self) -> None:
         """Close all connections."""

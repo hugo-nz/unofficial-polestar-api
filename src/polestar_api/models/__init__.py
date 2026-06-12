@@ -42,6 +42,18 @@ from .precleaning import PreCleaningErrorType, PreCleaningInfo, PreCleaningRunni
 from .wakeup import WakeUpRequest, WakeUpResponse, WakeUpReason
 from .weather import WeatherReport
 from .window import WindowControlRequest, WindowControlType
+from .vdms import (
+    CarVisualisation,
+    VdmsBatterySpec,
+    VdmsDimensions,
+    VdmsFeature,
+    VdmsImages,
+    VdmsLabelValue,
+    VdmsPerformanceOptimizationSpecification,
+    VdmsSpecification,
+    VdmsValueUnit,
+    VdmsVehicleInformation,
+)
 
 __all__ = [
     "AmpLimitResponse",
@@ -117,4 +129,14 @@ __all__ = [
     "WeatherReport",
     "WindowControlRequest",
     "WindowControlType",
+    "CarVisualisation",
+    "VdmsBatterySpec",
+    "VdmsDimensions",
+    "VdmsFeature",
+    "VdmsImages",
+    "VdmsLabelValue",
+    "VdmsPerformanceOptimizationSpecification",
+    "VdmsSpecification",
+    "VdmsValueUnit",
+    "VdmsVehicleInformation",
 ]

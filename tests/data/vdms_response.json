@@ -1,0 +1,62 @@
+{
+  "data": {
+    "vdms": {
+      "getVehiclesInformation": [
+        {
+          "belongsToFleet": null,
+          "content": {
+            "dimensions": {
+              "bodyDimensions": { "label": "Dimensions (L/H/W)", "value": "4.9m/1.61m/2.12m" },
+              "groundClearanceWithPerformance": { "label": "Ground clearance with Performance package", "value": "202 mm / 201 mm" },
+              "groundClearanceWithoutPerformance": { "label": "Ground clearance without Performance package", "value": "202 mm / 201 mm" },
+              "wheelbase": { "label": "Wheelbase", "value": "2.985 mm" }
+            },
+            "exterior": { "name": "Space" },
+            "images": {
+              "interior": [
+                { "alt": "Interior front seats", "angle": 0, "url": "https://car-images.polestar.com/interior/0.jpg" }
+              ],
+              "exterior": [
+                { "alt": "Side view", "angle": 0, "url": "https://car-images.polestar.com/exterior/0.jpg" }
+              ],
+              "exteriorTransparent": [
+                { "alt": null, "angle": 0, "url": "https://car-images.polestar.com/transparent/0.png" }
+              ],
+              "rims": [
+                { "alt": "Front left wheel", "angle": 0, "url": "https://car-images.polestar.com/rims/0.jpg" }
+              ]
+            },
+            "interior": { "name": "Animal welfare Nappa leather in Zinc with Black ash deco" },
+            "model": { "name": "Polestar 3" },
+            "motor": { "name": "Long range Dual motor" },
+            "performancePackage": null,
+            "pilotPackage": { "name": "Pilot" },
+            "performanceOptimizationSpecification": null,
+            "plusPackage": { "name": "Plus" },
+            "specification": {
+              "battery": "400V lithium-ion battery, 111 kWh capacity, 17 modules",
+              "electricMotors": "2 Electric motors, front and rear ",
+              "torque": "840 Nm",
+              "totalHp": "489 hp",
+              "totalKw": "360 kW",
+              "trunkCapacity": { "label": null, "value": "516 litre (front and back combined)" }
+            },
+            "wheels": { "name": "20\" Aero" }
+          },
+          "curbWeight": { "value": 2579, "unit": "kg" },
+          "edition": null,
+          "factoryCompleteDate": "2024-07-05",
+          "internalVehicleIdentifier": "00000000-0000-0000-0000-000000000000",
+          "market": "AU",
+          "maxTrailerWeight": { "value": 2200, "unit": "kg" },
+          "modelYear": "2025",
+          "packages": ["Pilot", "Plus"],
+          "primaryDriver": "00000000-0000-0000-0000-000000000001",
+          "registrationNo": "TEST123",
+          "software": { "performanceOptimization": { "value": false } },
+          "vin": "YSMYK00000TEST0000"
+        }
+      ]
+    }
+  }
+}
