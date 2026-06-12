@@ -249,6 +249,7 @@ class VdmsVehicleInformation:
     market: str | None = None
     model_name: str | None = None
     model_year: int | None = None
+    variant: str | None = None
     edition: str | None = None
     factory_complete_date: str | None = None
     primary_driver: str | None = None
@@ -290,6 +291,7 @@ class VdmsVehicleInformation:
         packages = [p for p in packages_raw if isinstance(p, str)] if isinstance(packages_raw, list) else []
 
         specification = VdmsSpecification.from_dict(content.get("specification"))
+        motor = VdmsFeature.from_dict(content.get("motor"))
 
         return cls(
             vin=_str(data.get("vin")),
@@ -298,6 +300,7 @@ class VdmsVehicleInformation:
             market=_str(data.get("market")),
             model_name=_str(model.get("name")),
             model_year=_model_year(data.get("modelYear")),
+            variant=motor.name if motor else None,
             edition=_str(data.get("edition")),
             factory_complete_date=_str(data.get("factoryCompleteDate")),
             primary_driver=_str(data.get("primaryDriver")),
@@ -313,7 +316,7 @@ class VdmsVehicleInformation:
             ),
             exterior=VdmsFeature.from_dict(content.get("exterior")),
             interior=VdmsFeature.from_dict(content.get("interior")),
-            motor=VdmsFeature.from_dict(content.get("motor")),
+            motor=motor,
             wheels=VdmsFeature.from_dict(content.get("wheels")),
             pilot_package=VdmsFeature.from_dict(content.get("pilotPackage")),
             plus_package=VdmsFeature.from_dict(content.get("plusPackage")),

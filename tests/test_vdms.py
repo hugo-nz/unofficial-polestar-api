@@ -64,6 +64,7 @@ class TestVdmsParsing:
     def test_features(self):
         car = _load_first_car()
         assert car.motor is not None and car.motor.name == "Long range Dual motor"
+        assert car.variant == "Long range Dual motor"
         assert car.wheels is not None and car.wheels.name == '20" Aero'
         assert car.exterior is not None and car.exterior.name == "Space"
 
