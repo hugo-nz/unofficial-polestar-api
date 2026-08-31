@@ -10,6 +10,7 @@ from .discovery import (
     get_vehicle_specifications as _fetch_specifications,
     get_vehicles,
 )
+from .exceptions import ApiError
 from .models.vdms import VdmsVehicleInformation
 from .vehicle import Vehicle
 
@@ -74,6 +75,25 @@ class PolestarApi:
             if v.vin == vin:
                 return v
         raise ValueError(f"Vehicle not found: {vin}")
+
+    def vehicle_from_vin(self, vin: str) -> Vehicle:
+        """Build a ``Vehicle`` directly from a known VIN, bypassing
+        :meth:`get_vehicles`.
+
+        Use this as a fallback when the account's vehicle-listing
+        GraphQL query (``get_vehicles``) fails with an :class:`ApiError`
+        (for example when Polestar changes the app-backend schema) but
+        the vehicle's VIN is already known. All live telemetry and
+        controls still work normally since they go through the gRPC/C3
+        connection established in :meth:`async_init`, which is
+        independent of the vehicle-listing call. Metadata that would
+        normally come from the listing response (``internal_id``,
+        ``registration_no``, ``model_year``, ``model_name``) will be
+        left unset.
+        """
+        if self._connection is None:
+            raise ApiError("Cannot build a vehicle before async_init() has completed")
+        return Vehicle(vin=vin, connection=self._connection)
 
     async def get_vehicle_specifications(self) -> dict[str, VdmsVehicleInformation]:
         """Fetch full VDMS specifications (model year, packages, battery,
