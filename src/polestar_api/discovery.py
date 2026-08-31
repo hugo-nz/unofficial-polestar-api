@@ -39,6 +39,30 @@ query GetVDMSCars {
 }
 """
 
+# ── mystar-v2 fallback ──────────────────────────────────────────
+# Separate "consumer" GraphQL endpoint (used by pypolestar/pypolestar)
+# that lists vehicles via a different operation (GetConsumerCarsV2) and
+# schema than the app-backend VDMS endpoint above. When Polestar changes
+# the VDMS schema and APP_BACKEND_GET_VEHICLES_QUERY starts failing (see
+# https://github.com/kildahldev/unofficial-polestar-api/issues/30), this
+# endpoint has historically kept working, so it is used as a fallback
+# vehicle-listing source that still yields real model/registration data
+# instead of falling all the way back to a bare VIN.
+MYSTAR_V2_URL = "https://pc-api.polestar.com/eu-north-1/mystar-v2/"
+MYSTAR_LOCALE = "en-GB"
+
+MYSTAR_GET_CONSUMER_CARS_QUERY = """
+query GetConsumerCarsV2 {
+    getConsumerCarsV2 {
+        vin
+        internalVehicleIdentifier
+        registrationNo
+        modelYear
+        modelName
+    }
+}
+"""
+
 APP_BACKEND_GET_VDMS_FULL_QUERY = """
 query GetVDMSCars {
     vdms {
@@ -197,6 +221,66 @@ async def get_vehicle_specifications(access_token: str) -> list[VdmsVehicleInfor
 
         cars = ((data.get("data") or {}).get("vdms") or {}).get("getVehiclesInformation") or []
         return [VdmsVehicleInformation.from_dict(car) for car in cars if isinstance(car, dict)]
+
+
+async def get_vehicles_v2(access_token: str) -> list[VehicleInfo]:
+    """Fetch the user's vehicles from the mystar-v2 endpoint.
+
+    Fallback for :func:`get_vehicles` used when the app-backend VDMS
+    vehicle-listing query fails (e.g. after a Polestar schema change, see
+    https://github.com/kildahldev/unofficial-polestar-api/issues/30).
+    Uses the same consumer GraphQL endpoint and ``GetConsumerCarsV2``
+    operation as pypolestar/pypolestar, with simple bearer-token auth
+    instead of the app-backend's Apollo/``X-PolestarId-Authorization``
+    headers. Returns the same fields as ``get_vehicles`` (vin, internal
+    id, registration number, model year, model name) so callers don't
+    need to know which endpoint served the data.
+    """
+    async with httpx.AsyncClient(verify=_SSL_CONTEXT, timeout=30) as client:
+        response = await client.post(
+            MYSTAR_V2_URL,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "operationName": "GetConsumerCarsV2",
+                "variables": {"locale": MYSTAR_LOCALE},
+                "query": MYSTAR_GET_CONSUMER_CARS_QUERY,
+            },
+        )
+        if response.status_code != 200:
+            raise ApiError(f"Vehicle list failed (mystar-v2: {_http_failure(response)})", response.status_code)
+
+        data = response.json()
+        graphql_error = _graphql_error_text(data.get("errors"))
+        if graphql_error:
+            raise ApiError(f"Vehicle list failed (mystar-v2: {graphql_error})")
+
+        cars = (data.get("data") or {}).get("getConsumerCarsV2") or []
+        return _build_vehicle_list_v2(cars)
+
+
+def _build_vehicle_list_v2(cars: list[Any]) -> list[VehicleInfo]:
+    """Normalize mystar-v2 vehicle records (flat modelName, no content wrapper)."""
+    vehicles: list[VehicleInfo] = []
+    for car in cars:
+        if not isinstance(car, dict):
+            continue
+        vin = car.get("vin")
+        if not isinstance(vin, str) or not vin:
+            continue
+
+        vehicles.append(
+            VehicleInfo(
+                vin=vin,
+                internal_id=_string_or_none(car.get("internalVehicleIdentifier")),
+                registration_no=_string_or_none(car.get("registrationNo")),
+                model_year=_parse_model_year(car.get("modelYear")),
+                model_name=_string_or_none(car.get("modelName")),
+            )
+        )
+    return vehicles
 
 
 def _extract_app_backend_vehicles(data: dict[str, Any]) -> list[VehicleInfo]:

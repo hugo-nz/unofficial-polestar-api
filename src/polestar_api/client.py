@@ -9,6 +9,7 @@ from .discovery import (
     discover_c3_endpoint,
     get_vehicle_specifications as _fetch_specifications,
     get_vehicles,
+    get_vehicles_v2,
 )
 from .exceptions import ApiError
 from .models.vdms import VdmsVehicleInformation
@@ -52,9 +53,23 @@ class PolestarApi:
         )
 
     async def get_vehicles(self) -> list[Vehicle]:
-        """Fetch the user's vehicles."""
+        """Fetch the user's vehicles.
+
+        Tries the app-backend VDMS vehicle-listing query first. If that
+        fails with an :class:`ApiError` (e.g. after a Polestar schema
+        change — see
+        https://github.com/kildahldev/unofficial-polestar-api/issues/30),
+        falls back to the mystar-v2 ``GetConsumerCarsV2`` endpoint, which
+        still returns real ``model_name``/``model_year``/``registration_no``
+        metadata even when VDMS discovery is broken. Only if both sources
+        fail does this raise; callers can fall back further to
+        :meth:`vehicle_from_vin` at that point.
+        """
         token = await self._auth.ensure_valid_token()
-        infos = await get_vehicles(token)
+        try:
+            infos = await get_vehicles(token)
+        except ApiError:
+            infos = await get_vehicles_v2(token)
         self._vehicle_cache = infos
         return [
             Vehicle(
