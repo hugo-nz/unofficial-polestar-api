@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .auth import AuthManager, FileTokenStore, TokenStore
+from .auth import WEB_CLIENT, AuthManager, FileTokenStore, MemoryTokenStore, TokenStore
 from .connection import GrpcConnection
 from dataclasses import fields, replace
 
@@ -14,7 +14,7 @@ from .discovery import (
     get_vehicles,
     get_vehicles_v2,
 )
-from .exceptions import ApiError
+from .exceptions import ApiError, AuthError
 from .models.vdms import VdmsVehicleInformation
 from .vehicle import Vehicle
 
@@ -41,6 +41,13 @@ class PolestarApi:
         self._email = email
         self._password = password
         self._auth = AuthManager(token_store=token_store)
+        # Second identity for the mystar-v2 consumer endpoint, which rejects
+        # mobile-app tokens (401). Created lazily on first use so accounts
+        # that never need the fallback don't pay for a second login.
+        self._web_auth = AuthManager(
+            token_store=_web_token_store(token_store), client=WEB_CLIENT
+        )
+        self._web_authenticated = False
         self._connection: GrpcConnection | None = None
         self._vehicle_cache: list[VehicleInfo] | None = None
 
@@ -54,6 +61,13 @@ class PolestarApi:
             port=endpoint.port,
             auth=self._auth,
         )
+
+    async def _mystar_token(self) -> str:
+        """Return a web-client token for mystar-v2, logging in on first use."""
+        if not self._web_authenticated:
+            await self._web_auth.authenticate(self._email, self._password)
+            self._web_authenticated = True
+        return await self._web_auth.ensure_valid_token()
 
     async def get_vehicles(self) -> list[Vehicle]:
         """Fetch the user's vehicles.
@@ -72,15 +86,17 @@ class PolestarApi:
         try:
             infos = await get_vehicles(token)
         except ApiError:
-            infos = await get_vehicles_v2(token)
+            infos = await get_vehicles_v2(await self._mystar_token())
         else:
             # VDMS can also "succeed" with VIN-only records (every other
             # field null) for some accounts/markets. Enrich from mystar-v2
             # in that case; ignore its failures since we already have VINs.
             if not infos or any(_vehicle_info_incomplete(i) for i in infos):
                 try:
-                    infos = _merge_vehicle_infos(infos, await get_vehicles_v2(token))
-                except ApiError:
+                    infos = _merge_vehicle_infos(
+                        infos, await get_vehicles_v2(await self._mystar_token())
+                    )
+                except (ApiError, AuthError):
                     pass
         self._vehicle_cache = infos
         return [
@@ -134,14 +150,16 @@ class PolestarApi:
         try:
             specs = await _fetch_specifications(token)
         except ApiError:
-            specs = await _fetch_specifications_v2(token)
+            specs = await _fetch_specifications_v2(await self._mystar_token())
         else:
             # Same VIN-only failure mode as in get_vehicles(): fill any
             # missing fields from the consumer (mystar-v2) endpoint.
             if not specs or any(_spec_incomplete(s) for s in specs):
                 try:
-                    specs = _merge_specs(specs, await _fetch_specifications_v2(token))
-                except ApiError:
+                    specs = _merge_specs(
+                        specs, await _fetch_specifications_v2(await self._mystar_token())
+                    )
+                except (ApiError, AuthError):
                     pass
         return {spec.vin: spec for spec in specs if spec.vin}
 
@@ -209,3 +227,17 @@ def _fill_missing(primary, secondary):
             if other is not None and other != []:
                 updates[f.name] = other
     return replace(primary, **updates) if updates else primary
+
+
+def _web_token_store(token_store: TokenStore | None) -> TokenStore:
+    """Persist the web-client tokens next to the caller's mobile-client ones.
+
+    Tokens from the two OIDC clients are not interchangeable, so they can't
+    share a store. For a :class:`FileTokenStore` use a sibling ``.web`` file
+    so the second login is also cached across processes; otherwise fall back
+    to memory.
+    """
+    path = getattr(token_store, "_path", None) if isinstance(token_store, FileTokenStore) else None
+    if path is not None:
+        return FileTokenStore(path.with_name(path.name + ".web"))
+    return MemoryTokenStore()

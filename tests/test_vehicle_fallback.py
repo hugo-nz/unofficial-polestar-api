@@ -12,8 +12,42 @@ def _api() -> client_mod.PolestarApi:
     api = client_mod.PolestarApi(email="a@b.c", password="x")
     api._auth = AsyncMock()
     api._auth.ensure_valid_token = AsyncMock(return_value="tok")
+    api._web_auth = AsyncMock()
+    api._web_auth.ensure_valid_token = AsyncMock(return_value="web-tok")
     api._connection = object()
     return api
+
+
+class TestMystarToken:
+    async def test_v2_calls_use_web_client_token(self):
+        """mystar-v2 rejects mobile-app tokens, so v2 must get the web token."""
+        api = _api()
+        v2 = AsyncMock(return_value=[VehicleInfo(vin="VIN1", model_name="Polestar 2")])
+        with patch.object(client_mod, "get_vehicles", AsyncMock(side_effect=ApiError("broken"))), patch.object(
+            client_mod, "get_vehicles_v2", v2
+        ):
+            await api.get_vehicles()
+        api._web_auth.authenticate.assert_awaited_once_with("a@b.c", "x")
+        v2.assert_awaited_once_with("web-tok")
+
+    async def test_web_login_happens_once(self):
+        api = _api()
+        v2 = AsyncMock(return_value=[VehicleInfo(vin="VIN1", model_name="Polestar 2")])
+        with patch.object(client_mod, "get_vehicles", AsyncMock(side_effect=ApiError("broken"))), patch.object(
+            client_mod, "get_vehicles_v2", v2
+        ):
+            await api.get_vehicles()
+            await api.get_vehicles()
+        assert api._web_auth.authenticate.await_count == 1
+
+    def test_web_token_store_is_sibling_file(self, tmp_path):
+        store = client_mod.FileTokenStore(tmp_path / "tokens.json")
+        web = client_mod._web_token_store(store)
+        assert isinstance(web, client_mod.FileTokenStore)
+        assert web._path == tmp_path / "tokens.json.web"
+
+    def test_web_token_store_defaults_to_memory(self):
+        assert isinstance(client_mod._web_token_store(None), client_mod.MemoryTokenStore)
 
 
 class TestGetVehiclesEnrichment:

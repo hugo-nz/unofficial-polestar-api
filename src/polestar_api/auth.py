@@ -30,6 +30,30 @@ REDIRECT_URI = "polestar-explore://explore.polestar.com"
 SCOPES = "openid profile email customer:attributes customer:attributes:write"
 
 
+@dataclass(frozen=True)
+class OidcClient:
+    """An OIDC client registration at the Polestar ID provider.
+
+    Polestar's backends validate the token's issuing client, so a token
+    obtained for one client is not accepted by every API. Tokens from the
+    mobile-app client work for the app-backend GraphQL and gRPC/C3 APIs;
+    the ``mystar-v2`` consumer GraphQL endpoint (used by my.polestar.com
+    and pypolestar) answers 401 to them and needs a web-client token.
+    """
+
+    client_id: str
+    redirect_uri: str
+    scopes: str
+
+
+MOBILE_APP_CLIENT = OidcClient(CLIENT_ID, REDIRECT_URI, SCOPES)
+WEB_CLIENT = OidcClient(
+    client_id="l3oopkc_10",
+    redirect_uri="https://www.polestar.com/sign-in-callback",
+    scopes="openid profile email customer:attributes",
+)
+
+
 @dataclass
 class TokenData:
     access_token: str
@@ -120,8 +144,14 @@ def _should_follow_callback(location: str) -> bool:
 class AuthManager:
     """Manages OIDC authentication and token lifecycle."""
 
-    def __init__(self, token_store: TokenStore | None = None) -> None:
+    def __init__(
+        self,
+        token_store: TokenStore | None = None,
+        *,
+        client: OidcClient = MOBILE_APP_CLIENT,
+    ) -> None:
         self._token_store = token_store or MemoryTokenStore()
+        self._client = client
         self._tokens: TokenData | None = None
         self._auth_endpoint: str | None = None
         self._token_endpoint: str | None = None
@@ -192,9 +222,9 @@ class AuthManager:
         state = _b64urlencode(os.urandom(32))
         params = {
             "response_type": "code",
-            "client_id": CLIENT_ID,
-            "redirect_uri": REDIRECT_URI,
-            "scope": SCOPES,
+            "client_id": self._client.client_id,
+            "redirect_uri": self._client.redirect_uri,
+            "scope": self._client.scopes,
             "state": state,
             "code_challenge": code_challenge,
             "code_challenge_method": "S256",
@@ -253,7 +283,10 @@ class AuthManager:
             # Old web flows used an HTTPS callback we could fetch; the current
             # mobile-app flow redirects to a custom scheme that is not fetchable.
             if _should_follow_callback(location):
-                await client.get(location)
+                try:
+                    await client.get(location)
+                except httpx.HTTPError:
+                    pass  # The code is already in hand; the callback page is cosmetic.
 
         return code
 
@@ -264,8 +297,8 @@ class AuthManager:
                 data={
                     "grant_type": "authorization_code",
                     "code": code,
-                    "redirect_uri": REDIRECT_URI,
-                    "client_id": CLIENT_ID,
+                    "redirect_uri": self._client.redirect_uri,
+                    "client_id": self._client.client_id,
                     "code_verifier": code_verifier,
                 },
             )
@@ -293,7 +326,7 @@ class AuthManager:
                 data={
                     "grant_type": "refresh_token",
                     "refresh_token": self._tokens.refresh_token,
-                    "client_id": CLIENT_ID,
+                    "client_id": self._client.client_id,
                 },
             )
             if r.status_code >= 400:
