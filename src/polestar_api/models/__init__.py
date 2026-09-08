@@ -35,6 +35,7 @@ from .honkflash import HonkAndFlashRequest, HonkAndFlashResponse
 from .invocation import InvocationRequest, InvocationResponse, InvocationStatus
 from .location import LocationRequest, LocationResponse, LocationStatusUpdate
 from .locks import CarLockRequest, CarLockResponse, CarUnlockRequest, CarUnlockResponse
+from .mycars import CarBattery, CarDetails, MyCarEntry
 from .odometer import OdometerStatus
 from .ota import CarSoftwareInfo, Scheduler, SoftwareDescription, SoftwareState, ScheduleStatus
 from .parking_climate_timer import ParkingClimateTimer
@@ -116,7 +117,10 @@ __all__ = [
     "TargetSocResponse",
     "Timestamp",
     "WakeUpReason",
+    "CarBattery",
+    "CarDetails",
     "CarSoftwareInfo",
+    "MyCarEntry",
     "Scheduler",
     "ScheduleStatus",
     "SoftwareDescription",

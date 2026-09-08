@@ -13,6 +13,7 @@ from .health import HealthServiceClient
 from .invocation import InvocationServiceClient
 from .location import LocationServiceClient
 from .odometer import OdometerServiceClient
+from .mycars import MyCarsServiceClient
 from .ota import OtaServiceClient
 from .parking_climate_timer import ParkingClimateTimerServiceClient
 from .precleaning import PreCleaningServiceClient
@@ -33,6 +34,7 @@ __all__ = [
     "InvocationServiceClient",
     "LocationServiceClient",
     "OdometerServiceClient",
+    "MyCarsServiceClient",
     "OtaServiceClient",
     "ParkingClimateTimerServiceClient",
     "PreCleaningServiceClient",

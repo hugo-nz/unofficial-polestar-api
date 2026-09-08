@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from .models.availability import Availability
 from .models.battery import Battery
 from .models.charge_location import ChargeLocation
+from .models.mycars import MyCarEntry
 from .models.ota import CarSoftwareInfo, Scheduler
 from .models.parking_climate_timer import ParkingClimateTimer, ParkingClimateTimerSettings
 from .models.precleaning import PreCleaningInfo
@@ -44,6 +45,7 @@ from .services.health import HealthServiceClient
 from .services.invocation import InvocationServiceClient
 from .services.location import LocationServiceClient
 from .services.odometer import OdometerServiceClient
+from .services.mycars import MyCarsServiceClient
 from .services.ota import OtaServiceClient
 from .services.parking_climate_timer import ParkingClimateTimerServiceClient
 from .services.precleaning import PreCleaningServiceClient
@@ -86,6 +88,7 @@ class Vehicle:
         self._invocation = InvocationServiceClient(connection, vin)
         self._location = LocationServiceClient(connection, vin)
         self._odometer = OdometerServiceClient(connection, vin)
+        self._mycars = MyCarsServiceClient(connection, vin)
         self._ota = OtaServiceClient(connection, vin)
         self._parking_climate_timer = ParkingClimateTimerServiceClient(connection, vin)
         self._precleaning = PreCleaningServiceClient(connection, vin)
@@ -342,6 +345,17 @@ class Vehicle:
     async def get_weather(self) -> WeatherReport | None:
         """Temperature at the car's current location, or ``None`` if unavailable."""
         return await self._weather.get_report()
+
+    # -- MyCars --
+
+    async def get_mycars(self) -> MyCarEntry | None:
+        """Vehicle identity, installed software version and static specs.
+
+        Unlike get_software_info() this reports the *installed* version even
+        when no OTA update is pending, and carries battery capacity, weight,
+        market and factory option codes.
+        """
+        return await self._mycars.get_mycars()
 
     # -- OTA --
 

@@ -38,6 +38,8 @@ class BackendProfile:
     weather_svc: str = "/weather.WeatherService"
     ota_discovery_svc: str = "/ota_mobcache.OtaDiscoveryService"
     ota_scheduler_svc: str = "/ota_mobcache.SchedulerService"
+    # Vehicle identity, installed software version and static specs (C3).
+    mycars_svc: str = "/car_information.CarInformation"
 
 
 C3 = BackendProfile()
