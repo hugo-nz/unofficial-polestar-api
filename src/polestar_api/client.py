@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from .auth import AuthManager, FileTokenStore, TokenStore
 from .connection import GrpcConnection
+from dataclasses import fields, replace
+
 from .discovery import (
     VehicleInfo,
     discover_c3_endpoint,
     get_vehicle_specifications as _fetch_specifications,
+    get_vehicle_specifications_v2 as _fetch_specifications_v2,
     get_vehicles,
     get_vehicles_v2,
 )
@@ -70,6 +73,15 @@ class PolestarApi:
             infos = await get_vehicles(token)
         except ApiError:
             infos = await get_vehicles_v2(token)
+        else:
+            # VDMS can also "succeed" with VIN-only records (every other
+            # field null) for some accounts/markets. Enrich from mystar-v2
+            # in that case; ignore its failures since we already have VINs.
+            if not infos or any(_vehicle_info_incomplete(i) for i in infos):
+                try:
+                    infos = _merge_vehicle_infos(infos, await get_vehicles_v2(token))
+                except ApiError:
+                    pass
         self._vehicle_cache = infos
         return [
             Vehicle(
@@ -119,7 +131,18 @@ class PolestarApi:
         all live gRPC methods unchanged.
         """
         token = await self._auth.ensure_valid_token()
-        specs = await _fetch_specifications(token)
+        try:
+            specs = await _fetch_specifications(token)
+        except ApiError:
+            specs = await _fetch_specifications_v2(token)
+        else:
+            # Same VIN-only failure mode as in get_vehicles(): fill any
+            # missing fields from the consumer (mystar-v2) endpoint.
+            if not specs or any(_spec_incomplete(s) for s in specs):
+                try:
+                    specs = _merge_specs(specs, await _fetch_specifications_v2(token))
+                except ApiError:
+                    pass
         return {spec.vin: spec for spec in specs if spec.vin}
 
     async def close(self) -> None:
@@ -134,3 +157,55 @@ class PolestarApi:
 
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
+
+
+def _vehicle_info_incomplete(info: VehicleInfo) -> bool:
+    return info.model_name is None and info.model_year is None and info.registration_no is None
+
+
+def _spec_incomplete(spec: VdmsVehicleInformation) -> bool:
+    return spec.model_name is None and spec.model_year is None and spec.specification is None
+
+
+def _merge_vehicle_infos(primary: list[VehicleInfo], secondary: list[VehicleInfo]) -> list[VehicleInfo]:
+    """Fill ``None`` fields of ``primary`` records from ``secondary`` (matched by VIN).
+
+    Vehicles only present in ``secondary`` are appended.
+    """
+    by_vin = {v.vin.upper(): v for v in secondary if v.vin}
+    merged: list[VehicleInfo] = []
+    seen: set[str] = set()
+    for info in primary:
+        key = info.vin.upper()
+        seen.add(key)
+        other = by_vin.get(key)
+        merged.append(_fill_missing(info, other) if other else info)
+    merged.extend(v for k, v in by_vin.items() if k not in seen)
+    return merged
+
+
+def _merge_specs(
+    primary: list[VdmsVehicleInformation], secondary: list[VdmsVehicleInformation]
+) -> list[VdmsVehicleInformation]:
+    by_vin = {s.vin.upper(): s for s in secondary if s.vin}
+    merged: list[VdmsVehicleInformation] = []
+    seen: set[str] = set()
+    for spec in primary:
+        key = (spec.vin or "").upper()
+        seen.add(key)
+        other = by_vin.get(key)
+        merged.append(_fill_missing(spec, other) if other else spec)
+    merged.extend(s for k, s in by_vin.items() if k not in seen)
+    return merged
+
+
+def _fill_missing(primary, secondary):
+    """Return ``primary`` with every ``None``/empty-list field taken from ``secondary``."""
+    updates = {}
+    for f in fields(primary):
+        value = getattr(primary, f.name)
+        if value is None or value == []:
+            other = getattr(secondary, f.name, None)
+            if other is not None and other != []:
+                updates[f.name] = other
+    return replace(primary, **updates) if updates else primary

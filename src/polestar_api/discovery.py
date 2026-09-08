@@ -63,6 +63,58 @@ query GetConsumerCarsV2 {
 }
 """
 
+# Richer GetConsumerCarsV2 selection used as a fallback for the deep VDMS
+# specifications query. The mystar-v2 record shape mirrors the VDMS one
+# (same ``content { model, motor, specification, dimensions ... }`` block and
+# top-level ``curbWeight``/``maxTrailerWeight``/``edition``/``software``), so
+# it can be parsed by ``VdmsVehicleInformation.from_dict`` directly. Car
+# images are intentionally not requested. If Polestar trims this schema the
+# caller retries with MYSTAR_GET_CONSUMER_CARS_QUERY.
+MYSTAR_GET_CONSUMER_CARS_FULL_QUERY = """
+query GetConsumerCarsV2 {
+    getConsumerCarsV2 {
+        vin
+        internalVehicleIdentifier
+        registrationNo
+        market
+        modelYear
+        modelName
+        edition
+        factoryCompleteDate
+        primaryDriver
+        belongsToFleet
+        curbWeight { value unit }
+        maxTrailerWeight { value unit }
+        software { performanceOptimization { value } }
+        content {
+            model { name }
+            motor { name }
+            exterior { name }
+            interior { name }
+            wheels { name }
+            pilotPackage { name }
+            plusPackage { name }
+            performancePackage { name }
+            performanceOptimizationSpecification { power { value unit } torqueMax { value unit } }
+            dimensions {
+                dimensions { label value }
+                groundClearanceWithPerformance { label value }
+                groundClearanceWithoutPerformance { label value }
+                wheelbase { label value }
+            }
+            specification {
+                battery
+                electricMotors
+                torque
+                totalHp
+                totalKw
+                trunkCapacity { label value }
+            }
+        }
+    }
+}
+"""
+
 APP_BACKEND_GET_VDMS_FULL_QUERY = """
 query GetVDMSCars {
     vdms {
@@ -223,19 +275,8 @@ async def get_vehicle_specifications(access_token: str) -> list[VdmsVehicleInfor
         return [VdmsVehicleInformation.from_dict(car) for car in cars if isinstance(car, dict)]
 
 
-async def get_vehicles_v2(access_token: str) -> list[VehicleInfo]:
-    """Fetch the user's vehicles from the mystar-v2 endpoint.
-
-    Fallback for :func:`get_vehicles` used when the app-backend VDMS
-    vehicle-listing query fails (e.g. after a Polestar schema change, see
-    https://github.com/kildahldev/unofficial-polestar-api/issues/30).
-    Uses the same consumer GraphQL endpoint and ``GetConsumerCarsV2``
-    operation as pypolestar/pypolestar, with simple bearer-token auth
-    instead of the app-backend's Apollo/``X-PolestarId-Authorization``
-    headers. Returns the same fields as ``get_vehicles`` (vin, internal
-    id, registration number, model year, model name) so callers don't
-    need to know which endpoint served the data.
-    """
+async def _post_mystar_v2(access_token: str, query: str, what: str) -> list[Any]:
+    """POST a ``GetConsumerCarsV2`` query to mystar-v2 and return the car list."""
     async with httpx.AsyncClient(verify=_SSL_CONTEXT, timeout=30) as client:
         response = await client.post(
             MYSTAR_V2_URL,
@@ -246,19 +287,60 @@ async def get_vehicles_v2(access_token: str) -> list[VehicleInfo]:
             json={
                 "operationName": "GetConsumerCarsV2",
                 "variables": {"locale": MYSTAR_LOCALE},
-                "query": MYSTAR_GET_CONSUMER_CARS_QUERY,
+                "query": query,
             },
         )
         if response.status_code != 200:
-            raise ApiError(f"Vehicle list failed (mystar-v2: {_http_failure(response)})", response.status_code)
+            raise ApiError(f"{what} failed (mystar-v2: {_http_failure(response)})", response.status_code)
 
         data = response.json()
         graphql_error = _graphql_error_text(data.get("errors"))
         if graphql_error:
-            raise ApiError(f"Vehicle list failed (mystar-v2: {graphql_error})")
+            raise ApiError(f"{what} failed (mystar-v2: {graphql_error})")
 
         cars = (data.get("data") or {}).get("getConsumerCarsV2") or []
-        return _build_vehicle_list_v2(cars)
+        return cars if isinstance(cars, list) else []
+
+
+async def get_vehicles_v2(access_token: str) -> list[VehicleInfo]:
+    """Fetch the user's vehicles from the mystar-v2 endpoint.
+
+    Fallback for :func:`get_vehicles` used when the app-backend VDMS
+    vehicle-listing query fails (e.g. after a Polestar schema change, see
+    https://github.com/kildahldev/unofficial-polestar-api/issues/30) or
+    succeeds but returns records with no metadata (VIN only). Uses the
+    same consumer GraphQL endpoint and ``GetConsumerCarsV2`` operation as
+    pypolestar/pypolestar, with simple bearer-token auth instead of the
+    app-backend's Apollo/``X-PolestarId-Authorization`` headers. Returns
+    the same fields as ``get_vehicles`` (vin, internal id, registration
+    number, model year, model name) so callers don't need to know which
+    endpoint served the data.
+    """
+    cars = await _post_mystar_v2(access_token, MYSTAR_GET_CONSUMER_CARS_QUERY, "Vehicle list")
+    return _build_vehicle_list_v2(cars)
+
+
+async def get_vehicle_specifications_v2(access_token: str) -> list[VdmsVehicleInformation]:
+    """Fetch vehicle specifications from mystar-v2 ``GetConsumerCarsV2``.
+
+    Fallback for :func:`get_vehicle_specifications`. Polestar's VDMS
+    backend may answer the deep ``GetVDMSCars`` query with a record that
+    only carries the VIN (every other field ``null``) for some accounts /
+    markets, while the consumer endpoint still has the full model,
+    registration and specification data. Tries the rich selection first
+    and retries with the minimal one if the rich schema is rejected.
+    """
+    try:
+        cars = await _post_mystar_v2(
+            access_token, MYSTAR_GET_CONSUMER_CARS_FULL_QUERY, "Vehicle specifications"
+        )
+    except ApiError as rich_err:
+        if rich_err.status_code in (401, 403):
+            raise
+        cars = await _post_mystar_v2(
+            access_token, MYSTAR_GET_CONSUMER_CARS_QUERY, "Vehicle specifications"
+        )
+    return [VdmsVehicleInformation.from_dict(car) for car in cars if isinstance(car, dict)]
 
 
 def _build_vehicle_list_v2(cars: list[Any]) -> list[VehicleInfo]:

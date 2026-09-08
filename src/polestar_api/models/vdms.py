@@ -147,7 +147,9 @@ class VdmsDimensions:
         if not isinstance(data, dict):
             return None
         return cls(
-            body_dimensions=VdmsLabelValue.from_dict(data.get("bodyDimensions")),
+            body_dimensions=VdmsLabelValue.from_dict(
+                data.get("bodyDimensions") if data.get("bodyDimensions") is not None else data.get("dimensions")
+            ),
             ground_clearance_with_performance=VdmsLabelValue.from_dict(
                 data.get("groundClearanceWithPerformance")
             ),
@@ -298,7 +300,7 @@ class VdmsVehicleInformation:
             internal_vehicle_identifier=_str(data.get("internalVehicleIdentifier")),
             registration_no=_str(data.get("registrationNo")),
             market=_str(data.get("market")),
-            model_name=_str(model.get("name")),
+            model_name=_str(model.get("name")) or _str(data.get("modelName")),
             model_year=_model_year(data.get("modelYear")),
             variant=motor.name if motor else None,
             edition=_str(data.get("edition")),
