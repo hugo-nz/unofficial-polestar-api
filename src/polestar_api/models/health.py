@@ -67,6 +67,64 @@ class LowVoltageBatteryWarning(IntEnum):
     TOO_LOW = 2
 
 
+class TpmsSensorMeasurement(IntEnum):
+    """How the tyre pressure monitoring system measures (direct sensors vs indirect via ABS)."""
+
+    UNSPECIFIED = 0
+    DIRECT = 1
+    INDIRECT_PERCENTAGE = 2
+    BASIC = 3
+
+
+class TpmsStatus(IntEnum):
+    UNSPECIFIED = 0
+    OK = 1
+    FAILURE = 2
+    TEMPORARILY_UNAVAILABLE = 3
+    UNAVAILABLE_DUE_TO_MISSING_CALIBRATION = 4
+    UNAVAILABLE_DUE_TO_FOUR_MISSING_SENSORS = 5
+    UNAVAILABLE_DUE_TO_INCOMPATIBLE_TYRES = 6
+    UNAVAILABLE_DUE_TO_SOFTWARE_UPGRADE = 7
+
+
+class TyrePressureValueStatus(IntEnum):
+    """Validity of an individual ``*_tyre_pressure_kpa`` reading."""
+
+    UNSPECIFIED = 0
+    OK = 1
+    UNVERIFIED = 2
+    INVALID = 3
+    NOT_AVAILABLE = 4
+
+
+@dataclass(frozen=True)
+class TyreStatus(ProtoMessage, schema={
+    1: "front_left_value_status",
+    2: "front_right_value_status",
+    3: "rear_left_value_status",
+    4: "rear_right_value_status",
+    5: "value_status_updated_at",
+    6: "sensor_measurement",
+    7: "system_status",
+}):
+    """``Health.tyre_status`` (field 47): TPMS health and per-wheel reading validity."""
+
+    front_left_value_status: TyrePressureValueStatus = TyrePressureValueStatus.UNSPECIFIED
+    front_right_value_status: TyrePressureValueStatus = TyrePressureValueStatus.UNSPECIFIED
+    rear_left_value_status: TyrePressureValueStatus = TyrePressureValueStatus.UNSPECIFIED
+    rear_right_value_status: TyrePressureValueStatus = TyrePressureValueStatus.UNSPECIFIED
+    value_status_updated_at: Timestamp | None = None
+    sensor_measurement: TpmsSensorMeasurement = TpmsSensorMeasurement.UNSPECIFIED
+    system_status: TpmsStatus = TpmsStatus.UNSPECIFIED
+
+    @property
+    def all_values_ok(self) -> bool:
+        return all(
+            getattr(self, f) == TyrePressureValueStatus.OK
+            for f in ("front_left_value_status", "front_right_value_status", "rear_left_value_status", "rear_right_value_status")
+        )
+
+
 @dataclass(frozen=True)
 class Health(ProtoMessage, schema={
     1: "timestamp",
@@ -120,6 +178,10 @@ class Health(ProtoMessage, schema={
     40: "front_right_tyre_pressure_kpa",
     41: "rear_left_tyre_pressure_kpa",
     42: "rear_right_tyre_pressure_kpa",
+    43: "front_tyres_reference_pressure_kpa",
+    44: "rear_tyres_reference_pressure_kpa",
+    # TPMS status
+    47: "tyre_status",
 }):
     timestamp: Timestamp | None = None
     # Service
@@ -172,6 +234,11 @@ class Health(ProtoMessage, schema={
     front_right_tyre_pressure_kpa: float = 0.0
     rear_left_tyre_pressure_kpa: float = 0.0
     rear_right_tyre_pressure_kpa: float = 0.0
+    # Recommended (placard) pressures for the fitted tyres
+    front_tyres_reference_pressure_kpa: float = 0.0
+    rear_tyres_reference_pressure_kpa: float = 0.0
+    # TPMS status
+    tyre_status: TyreStatus | None = None
 
     @property
     def any_light_failure(self) -> bool:

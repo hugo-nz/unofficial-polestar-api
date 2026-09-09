@@ -690,3 +690,32 @@ class TestPackedVarints:
         packed_data = encoded[pos:pos + length]
         result = decode_packed_varints(packed_data)
         assert result == values
+
+
+def test_health_decodes_tyre_status_and_reference_pressures():
+    from polestar_api.models.health import Health, TpmsSensorMeasurement, TpmsStatus, TyrePressureValueStatus, TyreStatus
+    from polestar_api.models.common import Timestamp
+
+    status = TyreStatus(
+        front_left_value_status=TyrePressureValueStatus.OK,
+        front_right_value_status=TyrePressureValueStatus.OK,
+        rear_left_value_status=TyrePressureValueStatus.UNVERIFIED,
+        rear_right_value_status=TyrePressureValueStatus.OK,
+        value_status_updated_at=Timestamp(seconds=1700000000),
+        sensor_measurement=TpmsSensorMeasurement.DIRECT,
+        system_status=TpmsStatus.OK,
+    )
+    health = Health(
+        front_left_tyre_pressure_kpa=250.0,
+        front_tyres_reference_pressure_kpa=260.0,
+        rear_tyres_reference_pressure_kpa=270.0,
+        tyre_status=status,
+    )
+    decoded = Health.from_bytes(health.to_bytes())
+    assert decoded.front_tyres_reference_pressure_kpa == 260.0
+    assert decoded.rear_tyres_reference_pressure_kpa == 270.0
+    assert decoded.tyre_status.system_status is TpmsStatus.OK
+    assert decoded.tyre_status.sensor_measurement is TpmsSensorMeasurement.DIRECT
+    assert decoded.tyre_status.rear_left_value_status is TyrePressureValueStatus.UNVERIFIED
+    assert decoded.tyre_status.value_status_updated_at.seconds == 1700000000
+    assert decoded.tyre_status.all_values_ok is False
