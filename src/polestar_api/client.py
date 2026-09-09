@@ -11,10 +11,12 @@ from .discovery import (
     discover_c3_endpoint,
     get_vehicle_specifications as _fetch_specifications,
     get_vehicle_specifications_v2 as _fetch_specifications_v2,
+    get_orders,
     get_vehicles,
     get_vehicles_v2,
 )
 from .exceptions import ApiError, AuthError
+from .models.poms import PomsOrder
 from .models.vdms import VdmsVehicleInformation
 from .vehicle import Vehicle
 
@@ -107,6 +109,8 @@ class PolestarApi:
                 registration_no=info.registration_no,
                 model_year=info.model_year,
                 model_name=info.model_name,
+                pno34=info.pno34,
+                structure_week=info.structure_week,
             )
             for info in infos
         ]
@@ -137,6 +141,16 @@ class PolestarApi:
         if self._connection is None:
             raise ApiError("Cannot build a vehicle before async_init() has completed")
         return Vehicle(vin=vin, connection=self._connection)
+
+    async def get_orders(self) -> list[PomsOrder]:
+        """POMS orders for this account, each with its car configuration
+        (battery/power/torque strings, motor variant, packages, pno34)."""
+        return await get_orders(await self._auth.ensure_valid_token())
+
+    async def get_order_for_vin(self, vin: str) -> PomsOrder | None:
+        """The POMS order whose car matches ``vin`` (``None`` if not ordered by this account)."""
+        want = vin.upper()
+        return next((o for o in await self.get_orders() if (o.vin or "").upper() == want), None)
 
     async def get_vehicle_specifications(self) -> dict[str, VdmsVehicleInformation]:
         """Fetch full VDMS specifications (model year, packages, battery,
@@ -178,7 +192,11 @@ class PolestarApi:
 
 
 def _vehicle_info_incomplete(info: VehicleInfo) -> bool:
-    return info.model_name is None and info.model_year is None and info.registration_no is None
+    # VDMS never returns pno34/structureWeek, which the configurator spec
+    # lookup needs, so a VDMS-only record always warrants mystar-v2 enrichment.
+    return (
+        info.model_name is None and info.model_year is None and info.registration_no is None
+    ) or info.pno34 is None
 
 
 def _spec_incomplete(spec: VdmsVehicleInformation) -> bool:

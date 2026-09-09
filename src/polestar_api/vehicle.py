@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from .discovery import get_car_features, get_car_specifications
+from .exceptions import ApiError
 from .models.availability import Availability
+from .models.carspec import CarFeatures, CarSpecifications
 from .models.battery import Battery
 from .models.charge_location import ChargeLocation
 from .models.mycars import MyCarEntry
@@ -68,12 +71,16 @@ class Vehicle:
         registration_no: str | None = None,
         model_year: int | None = None,
         model_name: str | None = None,
+        pno34: str | None = None,
+        structure_week: str | None = None,
     ) -> None:
         self.vin = vin
         self.internal_id = internal_id
         self.registration_no = registration_no
         self.model_year = model_year
         self.model_name = model_name
+        self.pno34 = pno34
+        self.structure_week = structure_week
 
         self._amp_limit = AmpLimitServiceClient(connection, vin)
         self._availability = AvailabilityServiceClient(connection, vin)
@@ -356,6 +363,31 @@ class Vehicle:
         market and factory option codes.
         """
         return await self._mycars.get_mycars()
+
+    # -- Car configurator specifications --
+
+    def _configurator_key(self) -> tuple[int, str, str]:
+        if not (self.model_year and self.pno34 and self.structure_week):
+            raise ApiError(
+                "Vehicle has no model_year/pno34/structure_week (needs GetConsumerCarsV2 metadata); "
+                "cannot look up configurator specifications"
+            )
+        return self.model_year, self.pno34, self.structure_week
+
+    async def get_car_specifications(self, market: str) -> CarSpecifications:
+        """Static spec table (power, torque, battery, range, weights, dimensions).
+
+        Uses the unauthenticated car-configurator service the official app
+        uses. ``market`` is the two-letter market code (``"AU"``) — take it
+        from :meth:`get_mycars` ``details.market``.
+        """
+        model_year, pno34, week = self._configurator_key()
+        return await get_car_specifications(model_year, pno34, week, market)
+
+    async def get_car_features(self, market: str) -> CarFeatures:
+        """Fitted features: motor variant, option packages, colour, upholstery, wheels."""
+        model_year, pno34, week = self._configurator_key()
+        return await get_car_features(model_year, pno34, week, market)
 
     # -- OTA --
 

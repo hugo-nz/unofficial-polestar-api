@@ -35,7 +35,17 @@ from .honkflash import HonkAndFlashRequest, HonkAndFlashResponse
 from .invocation import InvocationRequest, InvocationResponse, InvocationStatus
 from .location import LocationRequest, LocationResponse, LocationStatusUpdate
 from .locks import CarLockRequest, CarLockResponse, CarUnlockRequest, CarUnlockResponse
+from .carspec import (
+    CarFeature,
+    CarFeatureCategory,
+    CarFeatures,
+    CarSpecifications,
+    SpecNumeric,
+    SpecRow,
+    SpecValue,
+)
 from .mycars import CarBattery, CarDetails, MyCarEntry
+from .poms import PomsCar, PomsConfiguration, PomsFeature, PomsOrder
 from .odometer import OdometerStatus
 from .ota import CarSoftwareInfo, Scheduler, SoftwareDescription, SoftwareState, ScheduleStatus
 from .parking_climate_timer import ParkingClimateTimer
@@ -121,6 +131,17 @@ __all__ = [
     "CarDetails",
     "CarSoftwareInfo",
     "MyCarEntry",
+    "PomsCar",
+    "PomsConfiguration",
+    "PomsFeature",
+    "PomsOrder",
+    "CarFeature",
+    "CarFeatureCategory",
+    "CarFeatures",
+    "CarSpecifications",
+    "SpecNumeric",
+    "SpecRow",
+    "SpecValue",
     "Scheduler",
     "ScheduleStatus",
     "SoftwareDescription",

@@ -6,10 +6,13 @@ import ssl
 import uuid
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
 from .exceptions import ApiError
+from .models.carspec import CarFeatures, CarSpecifications
+from .models.poms import PomsOrder
 from .models.vdms import VdmsVehicleInformation
 
 _SSL_CONTEXT = ssl.create_default_context()
@@ -59,9 +62,58 @@ query GetConsumerCarsV2 {
         registrationNo
         modelYear
         modelName
+        pno34
+        structureWeek
     }
 }
 """
+
+# ── POMS orders ─────────────────────────────────────────────────
+# Order-management query used by the official app. Its ``configuration``
+# block carries the same human-readable spec strings VDMS ``content`` used
+# to have (battery, power, torque, motor variant, packages), so it is the
+# preferred source for those once VDMS returns VIN-only records. Only the
+# ordering account sees its orders.
+APP_BACKEND_GET_ORDERS_OPERATION = "GetOrdersV2"
+APP_BACKEND_GET_ORDERS_QUERY = """
+query GetOrdersV2 {
+    poms {
+        getOrders {
+            data {
+                car { edition engine exterior interior model modelYear vin wheels }
+                configurationId
+                countryCode
+                orderId
+                orderState
+                orderV2 {
+                    configuration {
+                        dimensions { label value }
+                        specifications { label value }
+                        features { displayType title }
+                        modelYear
+                        pno34
+                        structureWeek
+                    }
+                    orderStatus { status { deliveryStage } }
+                }
+                placedAt
+                type
+            }
+        }
+    }
+}
+"""
+
+# ── car-configurator specifications ─────────────────────────────
+# Unauthenticated REST service used by the official iOS/Android apps for
+# the "Specifications" screen (power, torque, battery, range, weights,
+# dimensions) and the fitted-features list (motor variant, packages,
+# colour, upholstery, wheels). Keyed by the vehicle's model year, PNO34
+# and structure week (all from GetConsumerCarsV2 / CarInformationByVins).
+# NOTE: ``locale`` is the *market code* (``au``, ``se``), not a BCP-47
+# locale — ``en-AU`` returns 404.
+CAR_CONFIGURATOR_URL = "https://pc-api.polestar.com/eu-north-1/car-configurator-back/"
+CAR_CONFIGURATOR_SENDER = "polestar-app-android"
 
 # Richer GetConsumerCarsV2 selection used as a fallback for the deep VDMS
 # specifications query. The mystar-v2 record shape mirrors the VDMS one
@@ -182,6 +234,8 @@ class VehicleInfo:
     registration_no: str | None = None
     model_year: int | None = None
     model_name: str | None = None
+    pno34: str | None = None
+    structure_week: str | None = None
 
 
 async def discover_c3_endpoint(access_token: str) -> GrpcEndpoint:
@@ -360,9 +414,84 @@ def _build_vehicle_list_v2(cars: list[Any]) -> list[VehicleInfo]:
                 registration_no=_string_or_none(car.get("registrationNo")),
                 model_year=_parse_model_year(car.get("modelYear")),
                 model_name=_string_or_none(car.get("modelName")),
+                pno34=_string_or_none(car.get("pno34")),
+                structure_week=_string_or_none(car.get("structureWeek")),
             )
         )
     return vehicles
+
+
+async def get_orders(access_token: str) -> list[PomsOrder]:
+    """Fetch the account's POMS orders (with per-car configuration specs)."""
+    async with httpx.AsyncClient(verify=_SSL_CONTEXT, timeout=30) as client:
+        response = await client.post(
+            APP_BACKEND_GRAPHQL_URL,
+            headers={
+                **_app_backend_headers(access_token),
+                "X-APOLLO-OPERATION-NAME": APP_BACKEND_GET_ORDERS_OPERATION,
+                "Accept": APP_BACKEND_ACCEPT_HEADER,
+                "Content-Type": "application/json",
+            },
+            json={
+                "operationName": APP_BACKEND_GET_ORDERS_OPERATION,
+                "variables": {},
+                "query": APP_BACKEND_GET_ORDERS_QUERY,
+                "extensions": {"clientLibrary": APP_BACKEND_CLIENT_LIBRARY},
+            },
+        )
+    if response.status_code != 200:
+        raise ApiError(f"Orders failed (app-backend: {_http_failure(response)})", response.status_code)
+    data = response.json()
+    graphql_error = _graphql_error_text(data.get("errors"))
+    if graphql_error:
+        raise ApiError(f"Orders failed (app-backend: {graphql_error})")
+    orders = (((data.get("data") or {}).get("poms") or {}).get("getOrders") or {}).get("data") or []
+    if not isinstance(orders, list):
+        return []
+    return [o for o in (PomsOrder.from_dict(x) for x in orders) if o]
+
+
+def _configurator_car_info_url(model_year: int | str, pno34: str, structure_week: str, suffix: str) -> str:
+    # pno34 contains embedded spaces that must survive as %20 in the path.
+    return (
+        f"{CAR_CONFIGURATOR_URL}configurator/api/car-info/"
+        f"{quote(str(model_year), safe='')}/{quote(pno34, safe='')}/{quote(structure_week, safe='')}/{suffix}"
+    )
+
+
+async def _get_configurator(url: str, market: str, what: str) -> Any:
+    async with httpx.AsyncClient(verify=_SSL_CONTEXT, timeout=30) as client:
+        r = await client.get(
+            url,
+            params={"locale": market.lower()},
+            headers={"Accept": "application/json", "sender": CAR_CONFIGURATOR_SENDER},
+        )
+    if r.status_code != 200:
+        raise ApiError(f"{what} failed: {r.status_code} {r.text[:200]}", r.status_code)
+    try:
+        return r.json()
+    except ValueError as e:
+        raise ApiError(f"{what}: invalid JSON response") from e
+
+
+async def get_car_specifications(
+    model_year: int | str, pno34: str, structure_week: str, market: str
+) -> CarSpecifications:
+    """Fetch the configurator specification table for one car configuration.
+
+    ``market`` is the two-letter market code (e.g. ``"AU"``) as returned by
+    GetMyCars / VDMS ``market``.
+    """
+    url = _configurator_car_info_url(model_year, pno34, structure_week, "car-spec/specifications/en-fallback")
+    return CarSpecifications.from_dict(await _get_configurator(url, market, "Car specifications"))
+
+
+async def get_car_features(
+    model_year: int | str, pno34: str, structure_week: str, market: str
+) -> CarFeatures:
+    """Fetch the fitted-features list (motor variant, packages, colour, wheels...)."""
+    url = _configurator_car_info_url(model_year, pno34, structure_week, "car-spec/en-fallback")
+    return CarFeatures.from_dict(await _get_configurator(url, market, "Car features"))
 
 
 def _extract_app_backend_vehicles(data: dict[str, Any]) -> list[VehicleInfo]:

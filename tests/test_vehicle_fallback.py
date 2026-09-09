@@ -65,7 +65,7 @@ class TestGetVehiclesEnrichment:
         assert cars[0].registration_no == "ABC123"
 
     async def test_complete_vdms_does_not_call_v2(self):
-        vdms = [VehicleInfo(vin="VIN1", model_name="Polestar 3", model_year=2025)]
+        vdms = [VehicleInfo(vin="VIN1", model_name="Polestar 3", model_year=2025, pno34="359EAPP", structure_week="202427")]
         v2_mock = AsyncMock()
         with patch.object(client_mod, "get_vehicles", AsyncMock(return_value=vdms)), patch.object(
             client_mod, "get_vehicles_v2", v2_mock
