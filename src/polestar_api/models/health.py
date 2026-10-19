@@ -138,11 +138,13 @@ class Health(ProtoMessage, schema={
     7: "engine_coolant_level_warning",
     8: "oil_level_warning",
     13: "washer_fluid_level_warning",
-    # Tyre pressure warnings
-    9: "front_left_tyre_pressure_warning",
-    10: "front_right_tyre_pressure_warning",
-    11: "rear_left_tyre_pressure_warning",
-    12: "rear_right_tyre_pressure_warning",
+    # Tyre pressure warnings. Wire order is rear-left, rear-right, front-left,
+    # front-right -- verified against physical gauge readings on two cars
+    # (an FL/RL and an FR/RR swap were both reported with the naive order).
+    9: "rear_left_tyre_pressure_warning",
+    10: "rear_right_tyre_pressure_warning",
+    11: "front_left_tyre_pressure_warning",
+    12: "front_right_tyre_pressure_warning",
     # Brake lights
     14: "brake_light_left_warning",
     15: "brake_light_center_warning",
@@ -174,10 +176,11 @@ class Health(ProtoMessage, schema={
     # 12V battery
     38: "low_voltage_battery_warning",
     # Tyre pressure values (kPa)
-    39: "front_left_tyre_pressure_kpa",
-    40: "front_right_tyre_pressure_kpa",
-    41: "rear_left_tyre_pressure_kpa",
-    42: "rear_right_tyre_pressure_kpa",
+    # Same rear-first wire order as the warnings above (see note there).
+    39: "rear_left_tyre_pressure_kpa",
+    40: "rear_right_tyre_pressure_kpa",
+    41: "front_left_tyre_pressure_kpa",
+    42: "front_right_tyre_pressure_kpa",
     43: "front_tyres_reference_pressure_kpa",
     44: "rear_tyres_reference_pressure_kpa",
     # TPMS status
