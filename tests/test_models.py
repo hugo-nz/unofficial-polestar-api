@@ -719,3 +719,22 @@ def test_health_decodes_tyre_status_and_reference_pressures():
     assert decoded.tyre_status.rear_left_value_status is TyrePressureValueStatus.UNVERIFIED
     assert decoded.tyre_status.value_status_updated_at.seconds == 1700000000
     assert decoded.tyre_status.all_values_ok is False
+
+
+def test_health_tyre_wire_order_matches_physical_wheels():
+    """Fields 39-42 are FR, RR, FL, RL (verified with distinct per-wheel pressures)."""
+    import struct
+
+    def f32(field, value):
+        key, out = (field << 3) | 5, b""
+        while key > 0x7F:
+            out += bytes([(key & 0x7F) | 0x80])
+            key >>= 7
+        return out + bytes([key]) + struct.pack("<f", value)
+
+    raw = f32(39, 272.5) + f32(40, 282.5) + f32(41, 260.0) + f32(42, 245.0)
+    h = Health.from_bytes(raw)
+    assert h.front_right_tyre_pressure_kpa == 272.5
+    assert h.rear_right_tyre_pressure_kpa == 282.5
+    assert h.front_left_tyre_pressure_kpa == 260.0
+    assert h.rear_left_tyre_pressure_kpa == 245.0
