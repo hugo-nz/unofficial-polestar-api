@@ -141,6 +141,24 @@ def _should_follow_callback(location: str) -> bool:
     return urlparse(location).scheme in {"http", "https"}
 
 
+def _keycloak_login_action(page: str) -> str | None:
+    """Return the Keycloak login form URL embedded in a login page, if any."""
+    match = re.search(r'"loginAction":\s*"([^"]+)"', page)
+    if not match:
+        return None
+    return match.group(1).replace("\\/", "/").replace("&amp;", "&")
+
+
+def _keycloak_message(page: str) -> str | None:
+    match = re.search(r'"message":\s*\{[^}]*?"summary":\s*"([^"]*)"', page)
+    return match.group(1) if match else None
+
+
+def _keycloak_page_id(page: str) -> str | None:
+    match = re.search(r'"pageId":\s*"([^"]+)"', page)
+    return match.group(1) if match else None
+
+
 class AuthManager:
     """Manages OIDC authentication and token lifecycle."""
 
@@ -235,7 +253,12 @@ class AuthManager:
             # Step 1: GET auth endpoint — lands on login page
             r = await client.get(self._auth_endpoint, params=params)
 
-            # Extract resume path from PingFederate HTML/JS
+            # Polestar ID now delegates the login form to a Keycloak realm.
+            login_action = _keycloak_login_action(r.text)
+            if login_action:
+                return await self._authorize_keycloak(client, login_action, email, password)
+
+            # Legacy flow: extract resume path from PingFederate HTML/JS
             resume_match = re.search(r'(?:url|action):\s*"(.+)"', r.text)
             if not resume_match:
                 raise AuthError(f"Could not find resume path in auth response (status {r.status_code})")
@@ -289,6 +312,43 @@ class AuthManager:
                     pass  # The code is already in hand; the callback page is cosmetic.
 
         return code
+
+    async def _authorize_keycloak(
+        self, client: httpx.AsyncClient, login_action: str, email: str, password: str
+    ) -> str:
+        r = await client.post(
+            login_action,
+            data={"username": email, "password": password, "credentialId": ""},
+            follow_redirects=False,
+        )
+
+        # Keycloak hands back to PingFederate, which redirects to the app's
+        # custom-scheme callback. Follow hops manually so we stop there.
+        for _ in range(10):
+            if r.status_code not in (301, 302, 303, 307, 308):
+                break
+            location = r.headers.get("location", "")
+            code = parse_qs(urlparse(location).query).get("code", [None])[0]
+            if location.startswith(self._client.redirect_uri) or (
+                code and not _should_follow_callback(location)
+            ):
+                if code is None:
+                    raise AuthError(f"No auth code in redirect: {location}")
+                if _should_follow_callback(location):
+                    try:
+                        await client.get(location)
+                    except httpx.HTTPError:
+                        pass
+                return code
+            r = await client.get(r.url.join(location), follow_redirects=False)
+
+        message = _keycloak_message(r.text)
+        if message:
+            raise AuthError(f"Login rejected: {message}")
+        page = _keycloak_page_id(r.text)
+        raise AuthError(
+            f"Login did not complete (status {r.status_code}, page {page or 'unknown'})"
+        )
 
     async def _exchange_token(self, code: str, code_verifier: str) -> None:
         async with httpx.AsyncClient(verify=_HTTPX_SSL_CONTEXT) as client:
